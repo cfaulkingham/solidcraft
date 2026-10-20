@@ -151,6 +151,33 @@ fn revolve_adjacent_profiles_on_the_axis() {
     assert!(rel(measure(&cut).unwrap().volume, want) < 1e-3, "{} vs {want}", measure(&cut).unwrap().volume);
 }
 
+/// A spline boss on a box: Offset Face moves the box's far end, whose faces and corners don't
+/// touch the boss's freeform wall (#745). A face next to that wall is still refused.
+#[test]
+fn offset_face_away_from_a_freeform_wall() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
+    let d = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(25.0, 5.0), b: Vec2::new(35.0, 5.0) },
+                Seg2::Cubic { p0: Vec2::new(35.0, 5.0), p1: Vec2::new(40.0, 12.0), p2: Vec2::new(28.0, 18.0), p3: Vec2::new(25.0, 5.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let boss = extrude(&Plane::XY.offset(10.0), &[d], 0.0, 5.0).unwrap().pop().unwrap();
+    let b = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
+    let before = measure(&b).unwrap();
+    let moved = offset_faces(&b, &[Vec3::new(0.0, 10.0, 5.0)], 1.0).unwrap();
+    let after = measure(&moved).unwrap();
+    assert!(moved.validity().is_empty(), "{:?}", moved.validity());
+    assert!(rel(after.volume, before.volume + 200.0) < 1e-6, "{} vs {}", after.volume, before.volume + 200.0);
+    assert!((after.bbox.min.x + 1.0).abs() < 1e-6, "{:?}", after.bbox);
+    assert_eq!(after.faces, before.faces);
+    let e = offset_faces(&b, &[Vec3::new(30.0, 8.0, 15.0)], 1.0).unwrap_err().to_string();
+    assert!(e.contains("not a plane, cylinder, cone, sphere or torus"), "{e}");
+}
+
 #[test]
 fn chamfer_and_step() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
