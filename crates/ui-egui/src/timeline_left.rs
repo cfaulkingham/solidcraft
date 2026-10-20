@@ -324,8 +324,9 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             Rect::from_min_size(pos2(header.center().x - side / 2.0, header.top() + i as f32 * (side + t.space_2)), vec2(side, side))
         };
-        if control.show(ui, rect).clicked() {
-            crate::timeline::run_transport(app, control);
+        let playing = app.timeline_playback.as_ref().map(|_| crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+        if control.show(ui, rect, playing).clicked() {
+            crate::timeline::run_transport(app, ui.ctx(), control);
         }
     }
 }
@@ -1385,6 +1386,9 @@ mod tests {
                     ("last", None),
                 ] {
                     h.step(&json!({"click":{"handle":format!("history:{control}")}})).unwrap();
+                    if control == "last" {
+                        h.frames(90);
+                    }
                     h.settle();
                     assert_eq!(h.app.session.doc.marker, position, "{mode:?} {dock} {width}: {control}");
                     assert_eq!(h.app.session.model.state().bodies.len(), position.unwrap_or(3));

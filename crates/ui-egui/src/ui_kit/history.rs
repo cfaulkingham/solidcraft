@@ -171,20 +171,22 @@ impl HistoryTransport {
             Self::First => "ui.history_first",
             Self::Back => "ui.history_back",
             Self::Forward => "ui.history_forward",
-            Self::Last => "ui.history_last",
+            Self::Last => "ui.history_play",
         })
     }
 
-    pub fn show(self, ui: &mut egui::Ui, rect: Rect) -> egui::Response {
+    pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: Option<TabAccent>) -> egui::Response {
         let t = Tokens::get();
+        let playing = playing.filter(|_| matches!(self, Self::Last));
+        let label = if playing.is_some() { crate::i18n::tr("ui.history_stop") } else { self.label() };
         let response = ui.interact(rect, ui.id().with(("history_transport", self.id())), egui::Sense::click());
         crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
-        if response.hovered() {
-            ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+        if playing.is_some() || response.hovered() {
+            ui.painter().rect_filled(rect, t.radius_sm, playing.map_or(t.hover, |accent| accent.soft));
         }
         icons::glyphs::transport_glyph(ui.painter(), rect.center(), self.id(), t.icon);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label()));
-        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(self.label())
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+        response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
     }
 }
 
