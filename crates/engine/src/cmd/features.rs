@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); sizing?: iso261|legacy (default iso261; preserved when redefining an existing thread; ignored for explicit designations); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -2261,14 +2261,14 @@ fn fine_only_hint(t: &str) -> Option<String> {
     None
 }
 
-/// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).
+/// Largest nominal diameter in the historical automatic-sizing table.
 const LARGEST_COARSE: f64 = 56.0;
 
-/// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
+/// The refusal when the saved sizing rule cannot fit a cylinder beyond the coarse table:
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
-fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
-    if solidcraft_doc::suggested_thread(st, face).is_ok() {
+fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3, sizing: solidcraft_doc::ThreadSizing) -> Option<String> {
+    if solidcraft_doc::suggested_thread_with_sizing(st, face, sizing).is_ok() {
         return None;
     }
     let cyl = st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, face)).min_by(|a, b| {
@@ -2811,13 +2811,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    let sizing = match p.get("sizing") {
+        None => solidcraft_doc::ThreadSizing::Iso261,
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`sizing` must be iso261 or legacy"))?,
+    };
     if designation.is_none()
-        && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
+        && let Some(msg) = beyond_coarse_range(&s.model.state(), face, sizing)
     {
         return Err(bad(cmd, msg));
     }
     let handedness = thread_handedness(p, cmd)?;
-    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness })?;
+    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness, sizing })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))

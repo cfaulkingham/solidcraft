@@ -464,11 +464,11 @@ fn a_thread_without_a_coarse_pitch_suggests_explicit_pitches() {
 }
 
 #[test]
-fn automatic_sizing_past_the_coarse_range_suggests_a_size_with_its_pitch() {
+fn legacy_sizing_past_the_coarse_range_suggests_a_size_with_its_pitch() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 37.5, "height": 10, "body_name": "Shaft"}));
     let saved = s.doc.to_json();
-    let e = s.execute("solid.thread", &json!({"face": [37.5, 0, 5]})).unwrap_err().to_string();
+    let e = s.execute("solid.thread", &json!({"face": [37.5, 0, 5], "sizing": "legacy"})).unwrap_err().to_string();
     assert!(e.contains("beyond the coarse thread range (up to M56)") && e.contains("M75x3 or M75x2"), "{e}");
     assert_eq!(s.doc.to_json(), saved);
     run(&mut s, "solid.thread", json!({"face": [37.5, 0, 5], "designation": "M75x2"}));
@@ -482,6 +482,59 @@ fn a_threaded_hole_without_a_coarse_pitch_suggests_explicit_pitches() {
     let e = s.execute("solid.hole", &json!({"position": [20, 20, 10], "thread": "M28"})).unwrap_err().to_string();
     assert!(e.contains("has no coarse ISO pitch") && e.contains("M28x2") && e.contains("M28x1.5"), "{e}");
     assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
+fn automatic_thread_sizing_survives_reload_redefine_and_diameter_edits() {
+    for (sizing, before, after) in [("legacy", "M42", "M48"), ("iso261", "M45x4.5", "M50x1.5")] {
+        for handedness in [solidcraft_doc::ThreadHandedness::Right, solidcraft_doc::ThreadHandedness::Left] {
+            let mut s = Session::default();
+            run(&mut s, "solid.cylinder", json!({"radius":22,"height":10,"name":"Shaft"}));
+            let id = run(&mut s, "solid.thread", json!({"face":[22,0,5],"sizing":sizing,"handedness":handedness}))["feature"].as_u64().unwrap();
+            let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+            let feature = saved["features"].as_array().unwrap().iter().find(|f| f["id"] == id).unwrap();
+            assert!(feature.get("designation").is_none(), "automatic sizes must not be frozen");
+            if sizing == "legacy" {
+                assert!(feature.get("sizing").is_none(), "old features keep their serialized definition");
+                // Simulate a design written before this pending format change existed.
+                saved["format_pending"].as_array_mut().unwrap().retain(|v| v != "thread-sizing");
+            } else {
+                assert_eq!(feature["sizing"], "iso261");
+            }
+            s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+            assert_eq!(s.world_state().threads[0].designation, before);
+            assert_eq!(s.world_state().threads[0].handedness, handedness);
+            // CLI/MCP feature edits that omit sizing must also preserve the saved rule.
+            run(
+                &mut s,
+                "timeline.redefine",
+                json!({"feature":id,"command":"solid.thread","params":{"face":[22,0,5],"length":6,"handedness":handedness}}),
+            );
+            assert_eq!(s.world_state().threads[0].designation, before);
+            assert_eq!(s.world_state().threads[0].handedness, handedness);
+            run(&mut s, "timeline.edit", json!({"feature":"Shaft","set":{"radius":"25"}}));
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+            assert_eq!(s.world_state().threads[0].designation, after);
+            assert_eq!(s.world_state().threads[0].handedness, handedness);
+            s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            assert_eq!(s.world_state().threads[0].designation, after);
+            assert_eq!(s.world_state().threads[0].handedness, handedness);
+        }
+    }
+}
+
+#[test]
+fn explicit_thread_sizes_remain_fixed_and_invalid_sizing_is_atomic() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":22,"height":10,"name":"Shaft"}));
+    run(&mut s, "solid.thread", json!({"face":[22,0,5],"designation":"M44x1.5"}));
+    run(&mut s, "timeline.edit", json!({"feature":"Shaft","set":{"radius":"23"}}));
+    assert_eq!(s.world_state().threads[0].designation, "M44x1.5");
+    let saved = s.doc.to_json();
+    for sizing in [json!("unknown"), json!(null), json!(false), json!(5), json!({})] {
+        assert!(s.execute("solid.thread", &json!({"face":[23,0,5],"sizing":sizing})).is_err());
+        assert_eq!(s.doc.to_json(), saved);
+    }
 }
 
 #[test]
