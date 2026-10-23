@@ -89,7 +89,7 @@ fn a_command_computed_off_the_thread_is_not_evaluated_again() {
 fn playback_waits_for_each_background_rebuild_before_timing_the_next_step() {
     let mut h = block_boss_hole();
     h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-    crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last);
+    crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
     h.frames(1);
     for position in 1..=3 {
         assert!(h.app.deferred.is_some(), "step {position} is computed in the background");
@@ -124,14 +124,19 @@ fn playback_waits_for_each_background_rebuild_before_timing_the_next_step() {
 
 #[test]
 fn interrupted_playback_never_applies_its_pending_background_step() {
-    for action in ["stop", "edit", "marker", "tool", "palette", "new"] {
+    for action in ["stop", "last", "edit", "marker", "tool", "palette", "new"] {
         let mut h = block_boss_hole();
         h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-        crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last);
+        crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
         h.frames(1);
         assert!(h.app.deferred.is_some());
         match action {
-            "stop" => crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last),
+            "stop" => crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play),
+            "last" => {
+                crate::timeline::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last);
+                until_settled(&mut h);
+                assert_eq!(marker(&h), None, "Go to end supersedes the pending playback step");
+            }
             "edit" => {
                 h.app.run("timeline.rename", json!({"feature": 1, "name": "Renamed"})).unwrap();
             }

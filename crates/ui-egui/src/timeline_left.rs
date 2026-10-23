@@ -1386,9 +1386,7 @@ mod tests {
                     ("last", None),
                 ] {
                     h.step(&json!({"click":{"handle":format!("history:{control}")}})).unwrap();
-                    if control == "last" {
-                        h.frames(90);
-                    }
+                    assert!(h.app.timeline_playback.is_none(), "navigation never starts playback");
                     h.settle();
                     assert_eq!(h.app.session.doc.marker, position, "{mode:?} {dock} {width}: {control}");
                     assert_eq!(h.app.session.model.state().bodies.len(), position.unwrap_or(3));
@@ -1400,8 +1398,12 @@ mod tests {
 
     #[test]
     fn seam_snaps_only_between_thin_and_medium_and_persists_free_widths() {
+        let thin = crate::ui_kit::history_width(false);
         let medium = crate::ui_kit::history_width(true);
-        for (width, delta, expected) in [(56.0, 40.0, medium), (medium, -40.0, 56.0), (medium, 63.0, medium + 63.0), (320.0, -41.0, 279.0)] {
+        let across_snap = (medium - thin) * 0.6;
+        for (width, delta, expected) in
+            [(thin, across_snap, medium), (medium, -across_snap, thin), (medium, 63.0, medium + 63.0), (320.0, -41.0, 279.0)]
+        {
             let mut h = Harness::new();
             h.app.preferences.timeline_left = true;
             h.app.preferences.timeline_left_width = width;

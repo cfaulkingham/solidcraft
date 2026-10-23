@@ -20,7 +20,8 @@ pub(crate) fn run_transport(app: &mut SolveApp, ctx: &egui::Context, control: cr
         crate::ui_kit::HistoryTransport::First => 0,
         crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
         crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
-        crate::ui_kit::HistoryTransport::Last => {
+        crate::ui_kit::HistoryTransport::Last => n,
+        crate::ui_kit::HistoryTransport::Play => {
             toggle_playback(app, ctx);
             return;
         }
@@ -853,7 +854,7 @@ mod tests {
                 h.app.run("view.history_layout", json!({"dock":dock,"width":width})).unwrap();
                 h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
                 h.frames(2);
-                h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+                h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
                 assert_eq!(h.app.session.doc.marker, Some(1), "the first feature must be shown before the end; {layout:?} {dock} {width}");
                 assert_eq!(h.app.session.model.state().bodies.len(), 1);
                 h.frames(10);
@@ -867,15 +868,20 @@ mod tests {
 
     #[test]
     fn playback_can_be_stopped_or_interrupted() {
-        for action in ["stop", "back", "escape", "edit", "tool", "palette", "new"] {
+        for action in ["stop", "back", "last", "escape", "edit", "tool", "palette", "new"] {
             let mut h = two_boxes(false);
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);
-            h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
             assert_eq!(h.app.session.doc.marker, Some(1));
             match action {
-                "stop" => h.step(&json!({"click": {"handle": "history:last"}})).unwrap(),
+                "stop" => h.step(&json!({"click": {"handle": "history:play"}})).unwrap(),
                 "back" => h.step(&json!({"click": {"handle": "history:back"}})).unwrap(),
+                "last" => {
+                    h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+                    assert_eq!(h.app.session.doc.marker, None, "Go to end jumps immediately, even during playback");
+                    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+                }
                 "escape" => h.step(&json!({"key": "Escape"})).unwrap(),
                 "edit" => {
                     h.app.run("timeline.rename", json!({"feature": "First", "name": "Renamed"})).unwrap();
@@ -898,7 +904,7 @@ mod tests {
     fn playback_keeps_a_visible_pause_after_a_synchronous_rebuild() {
         let mut h = two_boxes(false);
         h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
-        super::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Last);
+        super::run_transport(&mut h.app, &h.ctx, crate::ui_kit::HistoryTransport::Play);
         super::tick_playback(&mut h.app, &h.ctx);
         assert_eq!(h.app.session.doc.marker, Some(1));
         // Model a rebuild that held the window thread for ten seconds. Its first visible
@@ -916,7 +922,7 @@ mod tests {
         for mut h in [Harness::new(), two_boxes(false)] {
             h.frames(2);
             let revision = h.app.session.revision;
-            h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
             h.frames(60);
             assert_eq!(h.app.session.revision, revision);
             assert!(h.app.timeline_playback.is_none());
