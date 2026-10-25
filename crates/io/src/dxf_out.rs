@@ -801,7 +801,7 @@ mod tests {
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i % 3) as f64);
         }
-        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]);
+        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]).unwrap();
         let back_nine = read_dxf(&nine).unwrap();
         assert!(
             matches!(&back_nine[..], [Geom2::Spline { pts, control: true, degree: 9 }] if pts.len() == 10 && pts.iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),

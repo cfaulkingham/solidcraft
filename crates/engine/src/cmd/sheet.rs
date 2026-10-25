@@ -770,7 +770,7 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         for e in &mut entities {
             e.layer = "0".into();
         }
-        return Ok(solidcraft_io::write_dxf_drawing(&[], &entities));
+        return Ok(solidcraft_io::write_dxf_drawing(&[], &entities)?);
     }
     // The four layers of every flat pattern, and those the rest is on.
     let mut names: std::collections::BTreeSet<String> = ["OUTLINE", "CUT", "BEND_UP", "BEND_DOWN"].map(String::from).into();
