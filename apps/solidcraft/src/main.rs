@@ -1079,6 +1079,7 @@ mod viewport_tests {
         // AppKit points are independent of Retina scale and of the user's UI zoom.
         for (zoom, retina) in [(1.0, 1.0), (1.0, 2.0), (1.5, 2.0), (2.0, 2.0)] {
             let ctx = egui::Context::default();
+            solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
             ctx.set_zoom_factor(zoom);
             let mut app = super::SolveApp::new(super::Session::default(), Default::default());
             app.integrated_titlebar = true;
