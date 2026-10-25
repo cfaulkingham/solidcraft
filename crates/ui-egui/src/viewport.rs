@@ -5732,7 +5732,7 @@ mod tests {
         app.run("component.activate", json!({"component":"root"})).unwrap();
         app.run("occurrence.copy", json!({"component":imported["component"],"translate":[40,0,0]})).unwrap();
         app.ui.show_grid = false;
-        app.ui.show_origin = false;
+        app.set_origin_shown(false);
         app.ui.ground_shadow = false;
         app.fit_view();
         for style in 0..4 {
