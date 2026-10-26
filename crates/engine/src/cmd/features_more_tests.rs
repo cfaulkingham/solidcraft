@@ -2,6 +2,110 @@ use serde_json::{Value, json};
 
 use crate::Session;
 
+fn extrude_join_bridge(s: &mut Session) -> Value {
+    for (name, x) in [("Left", 0), ("Right", 30)] {
+        run(s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[x,0,0],"body_name":name}));
+    }
+    run(s, "sketch.create", json!({"plane":"XY","name":"Bridge"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0":[-5,5],"p1":[55,15]}));
+    run(s, "sketch.finish", json!({}));
+    json!({"sketch":"Bridge","distance":15,"operation":"join"})
+}
+
+fn assert_extrude_keeps_hidden_right(s: &Session) {
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2, "Join must not consume the hidden body (#6454)");
+    for (name, expected) in [("Left", 11000.0), ("Right", 4000.0)] {
+        let body = &st.body(name).unwrap().body;
+        let got = solidcraft_kernel::measure(body).unwrap().volume;
+        assert!((got - expected).abs() < 1e-6, "{name}: {got} versus {expected}");
+    }
+}
+
+#[test]
+fn extrude_join_preserves_hidden_bodies_through_undo_and_reopen() {
+    let mut s = Session::default();
+    let params = extrude_join_bridge(&mut s);
+    run(&mut s, "browser.visibility", json!({"items":["Right"],"visible":false}));
+    run(&mut s, "solid.extrude", params);
+    assert_extrude_keeps_hidden_right(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - 8000.0).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_extrude_keeps_hidden_right(&s);
+    run(&mut s, "browser.visibility", json!({"items":["Right"],"visible":true}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    assert_extrude_keeps_hidden_right(&reopened);
+}
+
+#[test]
+fn extrude_join_with_all_automatic_targets_hidden_is_atomic() {
+    for hide in [json!({"items":["Left","Right"],"visible":false}), json!({"tree_folders":["c0/bodies"],"visible":false})] {
+        let mut s = Session::default();
+        let mut params = extrude_join_bridge(&mut s);
+        run(&mut s, "browser.visibility", hide);
+        let before = s.doc.to_json();
+        let err = s.execute("solid.extrude", &params).unwrap_err().to_string();
+        assert!(err.contains("no visible body to join"), "{err}");
+        assert_eq!(s.doc.to_json(), before);
+        params["operation"] = json!("new_body");
+        run(&mut s, "solid.extrude", params);
+        assert_eq!(s.model.state().bodies.len(), 3);
+    }
+}
+
+#[test]
+fn extrude_join_keeps_explicit_hidden_targets_and_all_visible_behavior() {
+    for scope in [json!({"targets":["Left","Right"]}), json!({"participants":["Left","Right"]}), json!({"participants":["*"]}), json!({})] {
+        let mut s = Session::default();
+        let mut params = extrude_join_bridge(&mut s);
+        if scope.as_object().is_some_and(|o| !o.is_empty()) {
+            run(&mut s, "browser.visibility", json!({"items":["Right"],"visible":false}));
+        }
+        params.as_object_mut().unwrap().extend(scope.as_object().unwrap().clone());
+        run(&mut s, "solid.extrude", params);
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!((volume(&mut s) - 13000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn extrude_join_visibility_does_not_expand_component_scope() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[-10,0,0],"body_name":"Outside"}));
+    run(&mut s, "component.create", json!({"name":"Part"}));
+    let params = extrude_join_bridge(&mut s);
+    run(&mut s, "browser.visibility", json!({"items":["Right"],"visible":false}));
+    run(&mut s, "solid.extrude", params);
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 3);
+    assert!((solidcraft_kernel::measure(&st.body("Outside").unwrap().body).unwrap().volume - 1000.0).abs() < 1e-6);
+    assert!((solidcraft_kernel::measure(&st.body("Right").unwrap().body).unwrap().volume - 4000.0).abs() < 1e-6);
+}
+
+#[test]
+fn extrude_join_visibility_also_applies_to_auto_and_inferred_face_targets() {
+    let mut s = Session::default();
+    let mut params = extrude_join_bridge(&mut s);
+    run(&mut s, "browser.visibility", json!({"items":["Right"],"visible":false}));
+    params["operation"] = json!("auto");
+    assert_eq!(crate::auto_operation(&s, &params), Some("join"));
+    run(&mut s, "solid.extrude", params);
+    assert_extrude_keeps_hidden_right(&s);
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "browser.visibility", json!({"items":["Stock"],"visible":false}));
+    let mut params = json!({"face":[5,5,10],"distance":2,"operation":"join"});
+    let before = s.doc.to_json();
+    assert!(s.execute("solid.extrude", &params).unwrap_err().to_string().contains("no visible body to join"));
+    assert_eq!(s.doc.to_json(), before, "the face's temporary sketch must also be rolled back");
+    params["targets"] = json!(["Stock"]);
+    run(&mut s, "solid.extrude", params);
+    assert!((volume(&mut s) - 1200.0).abs() < 1e-6);
+}
+
 #[test]
 fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
     let mut s = Session::default();
