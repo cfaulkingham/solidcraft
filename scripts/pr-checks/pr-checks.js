@@ -132,10 +132,15 @@ async function syncDefaultLabel({ github, context, core }) {
   const { status } = parseDefaults(pull.body);
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
-  if (status === 'yes' && !has) {
-    await github.rest.issues.addLabels({ ...args, labels: [DEFAULT_LABEL] });
-  } else if (status !== 'yes' && has) {
-    await github.rest.issues.removeLabel({ ...args, name: DEFAULT_LABEL });
+  try {
+    if (status === 'yes' && !has) {
+      await github.rest.issues.addLabels({ ...args, labels: [DEFAULT_LABEL] });
+    } else if (status !== 'yes' && has) {
+      await github.rest.issues.removeLabel({ ...args, name: DEFAULT_LABEL });
+    }
+  } catch (e) {
+    // Fork PRs' tokens cannot write labels; this is best-effort as documented.
+    core.warning(`Could not sync changes-default label (expected on fork PRs): ${e.message}`);
   }
   core.info(`Defaults line: ${status}`);
 }
