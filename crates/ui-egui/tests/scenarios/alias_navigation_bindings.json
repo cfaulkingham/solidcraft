@@ -16,13 +16,13 @@
   {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 860, "y1": 540, "steps": 8, "shift": true, "alt": true, "button": "middle"}},
   {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "no"}}},
 
-  {"note": "Zoom (dolly): dragging down moves away, dragging up moves closer."},
+  {"note": "Zoom (dolly): dragging down moves away, dragging up moves closer. Like the wheel, zoom holds the point under the pointer, so the target moves with it (#7435)."},
   {"camera": {"yaw": 0, "pitch": 0}},
   {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 800, "y1": 560, "steps": 8, "shift": true, "alt": true, "button": "right"}},
-  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": false, "zoomed": "out"}, "dialog": null}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "out"}, "dialog": null}},
   {"camera": {"yaw": 0, "pitch": 0}},
   {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 800, "y1": 440, "steps": 8, "shift": true, "alt": true, "button": "right"}},
-  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": false, "zoomed": "in"}}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "in"}}},
 
   {"note": "Fusion: Shift+Alt+left drag is not navigation."},
   {"call": "ui.prefs", "params": {"nav": "fusion"}},

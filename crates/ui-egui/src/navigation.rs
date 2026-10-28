@@ -753,7 +753,11 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
             match mode {
                 Some(NavMode::Pan) => app.cam.pan(f64::from(delta.x), f64::from(delta.y), h),
-                Some(NavMode::Zoom) => app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), None),
+                // Drag-zoom holds the point under the pointer, like the wheel (#7435).
+                Some(NavMode::Zoom) => {
+                    let anchor = zoom_anchor(app, rect, hover, caps.orbit);
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
+                }
                 _ => {}
             }
         }
@@ -812,12 +816,17 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     });
     let turn = caps.orbit && !sketch_view_is_initial;
     let height = f64::from(rect.height().max(1.0));
+    // A device has no pointer, so its zoom holds the model at the middle of the view, as the wheel
+    // holds the point under the cursor: the view comes up to the surface and stops (#7435). With
+    // "Zoom to the cursor" off the anchor is none, so the cap and the bridge zoom through the model
+    // as they did before, as the wheel does too.
+    let anchor = zoom_anchor(app, rect, Some(rect.center()), caps.orbit);
     if let Some(queued) = app.viewport.device_motion.take() {
-        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit);
+        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
-        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit);
+        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor);
     }
 }
 
@@ -828,8 +837,17 @@ const BRIDGE_ZOOM_PER_STEP: f64 = 0.08;
 /// A device app's `motion` (`space_mouse::bridge_frame`) on `cam`, in a view `height` points
 /// tall: orbit and pan as a pointer drag of that many points, zoom by steps. With `turn` off (a
 /// flat page, a sketch being edited) the view keeps its orientation and the orbit motion pans
-/// instead, so the device still moves the view.
-pub(crate) fn bridge_camera(cam: &mut Camera, motion: BridgeMotion, height: f64, turn: bool, reverse_zoom: bool, free_orbit: bool) {
+/// instead, so the device still moves the view. `anchor` is the model point the view holds while
+/// it zooms, as the wheel's cursor point (none zooms through the model, #7435).
+pub(crate) fn bridge_camera(
+    cam: &mut Camera,
+    motion: BridgeMotion,
+    height: f64,
+    turn: bool,
+    reverse_zoom: bool,
+    free_orbit: bool,
+    anchor: Option<Vec3>,
+) {
     let motion = BridgeMotion::default().plus(motion);
     let [mut px, mut py] = motion.pan;
     let [ox, oy] = motion.orbit;
@@ -848,14 +866,24 @@ pub(crate) fn bridge_camera(cam: &mut Camera, motion: BridgeMotion, height: f64,
     }
     if motion.zoom != 0.0 {
         let zoom_sign = if reverse_zoom { -1.0 } else { 1.0 };
-        cam.zoom_at((-motion.zoom * zoom_sign * BRIDGE_ZOOM_PER_STEP).exp(), None);
+        cam.zoom_at((-motion.zoom * zoom_sign * BRIDGE_ZOOM_PER_STEP).exp(), anchor);
     }
 }
 
 /// `seconds` of 3D mouse `motion` on `cam`, in a view `height` points tall. A full deflection
 /// pans about 0.6 of the view's height a second and turns about two radians a second, whatever
-/// the frame rate. With `turn` off the view keeps its orientation.
-pub(crate) fn device_camera(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, turn: bool, reverse_zoom: bool, free_orbit: bool) {
+/// the frame rate. With `turn` off the view keeps its orientation. `anchor` is the model point the
+/// view holds while it zooms, as the wheel's cursor point (none zooms through the model, #7435).
+pub(crate) fn device_camera(
+    cam: &mut Camera,
+    motion: Motion,
+    seconds: f64,
+    height: f64,
+    turn: bool,
+    reverse_zoom: bool,
+    free_orbit: bool,
+    anchor: Option<Vec3>,
+) {
     if !(seconds > 0.0) || !seconds.is_finite() {
         return;
     }
@@ -865,7 +893,7 @@ pub(crate) fn device_camera(cam: &mut Camera, motion: Motion, seconds: f64, heig
     // profile can swap the physical forward/back and up/down axes before they reach here.
     cam.pan(x * height * 0.6 * seconds, z * height * 0.6 * seconds, height);
     let zoom_sign = if reverse_zoom { -1.0 } else { 1.0 };
-    cam.zoom_at((-y * zoom_sign * 1.5 * seconds).exp(), None);
+    cam.zoom_at((-y * zoom_sign * 1.5 * seconds).exp(), anchor);
     if turn {
         // These are logical 3DxWare coordinates after the profile mapping: Rx is Tilt, Ry is
         // Roll and Rz is Spin. The KMJ profile swaps physical Ry/Rz for the selected navigation
@@ -1631,7 +1659,7 @@ mod tests {
         }
         // Other presets keep the existing upright camera behavior.
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
-        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false);
+        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 
@@ -2063,6 +2091,55 @@ mod tests {
             let turned = (app.cam.yaw, app.cam.pitch, app.cam.roll) != (before.yaw, before.pitch, before.roll);
             assert_eq!(turned, turns, "{caps:?}");
             assert_eq!(app.cam.target != before.target, !turns, "{caps:?}: pans where it doesn't turn");
+        }
+    }
+
+    /// Every zoom holds the view at the model, as the wheel does: the 3D mouse cap, the navigation
+    /// bridge and drag-zoom come up to the surface and stop there (#7435). With "Zoom to the
+    /// cursor" off they keep the old zoom-through-the-model behaviour, as the wheel does.
+    #[test]
+    fn the_3d_mouse_bridge_and_drag_zoom_hold_the_view_at_the_model() {
+        use super::*;
+        use crate::space_mouse::{BridgeMotion, DeviceMotion, Motion};
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let outside = |cam: &Camera| {
+            let e = cam.eye();
+            e.x.abs() > 20.0 - 1e-6 || e.y.abs() > 20.0 - 1e-6 || e.z.abs() > 20.0 - 1e-6
+        };
+        for to_cursor in [true, false] {
+            for cap in [true, false] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+                h.app.preferences.zoom_to_cursor = to_cursor;
+                h.settle();
+                // The iso view looks straight at the box, as the report's sample does.
+                h.app.cam = Camera::default();
+                for _ in 0..60 {
+                    if cap {
+                        h.app.viewport.device_motion =
+                            Some(DeviceMotion { motion: Motion { translation: [0.0, 1.0, 0.0], rotation: [0.0; 3] }, seconds: 0.1 });
+                    } else {
+                        h.app.viewport.bridge_motion = Some(BridgeMotion { zoom: 1.0, ..Default::default() });
+                    }
+                    device(&mut h.app, rect, NavCaps::MODEL);
+                }
+                assert_eq!(outside(&h.app.cam), to_cursor, "to_cursor={to_cursor} cap={cap}: the eye ends at {:?}", h.app.cam.eye());
+            }
+        }
+        // Drag-zoom: the "Zoom" navigation tool follows the pointer, so it holds the model too.
+        for to_cursor in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+            h.app.preferences.zoom_to_cursor = to_cursor;
+            h.app.run("view.tool", json!({"tool": "zoom"})).unwrap();
+            h.settle();
+            h.app.cam = Camera::default();
+            let rect = h.app.viewport.rect.expect("the viewport");
+            let at = projection(&h.app, rect).to_screen(Vec3::ZERO).expect("the box's middle on screen");
+            for _ in 0..12 {
+                h.call("ui.drag", json!({"x0": at.x, "y0": at.y + 80.0, "x1": at.x, "y1": at.y - 80.0, "steps": 40}));
+            }
+            assert_eq!(outside(&h.app.cam), to_cursor, "drag to_cursor={to_cursor}: the eye ends at {:?}", h.app.cam.eye());
         }
     }
 
