@@ -582,6 +582,10 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // Then the user's choice of which motion drives which axis (invert and speed then go with the
     // axis, not the motion). After the settle: that works on the device's own calibrated axes.
     let axes = reassigned(axes, app.preferences.space_mouse_axis_source);
+    // Back at rest: the next push picks what the view turns around afresh.
+    if !axes.moving() {
+        app.viewport.device_pivot = None;
+    }
     // Only the window with focus: with two windows open, the cap moves the one being used, not both.
     if !app.preferences.space_mouse_enabled || app.home.open || app.file_picker_busy() || !axes.moving() || !ctx.input(|i| i.focused) {
         return false;
@@ -1068,6 +1072,18 @@ mod tests {
         let ctx = window(true);
         let raw = press(&mut app, &ctx, SHIFT, vec![wheel(1.0)]);
         assert!(raw.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { modifiers, .. } if modifiers.shift)));
+    }
+
+    /// What the cap turns the view around is chosen when it leaves rest and let go when it is back.
+    #[test]
+    fn the_cap_lets_go_of_its_turning_point_at_rest() {
+        let mut app = app();
+        let ctx = window(true);
+        app.space_mouse.device = Some("hid 046d:c62b".into());
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [0; 3], rotation: [300, 0, 0] }, 0.016);
+        assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");
     }
 
     #[test]
