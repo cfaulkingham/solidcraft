@@ -234,15 +234,34 @@ pub(crate) fn immediate_wheel(
 }
 
 /// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
-pub(crate) fn pinch_factor(input: &egui::InputState) -> f32 {
-    input
-        .events
-        .iter()
-        .filter_map(|event| {
-            let egui::Event::Zoom(f) = event else { return None };
-            (*f).is_finite().then_some(*f).filter(|f| *f > 0.0)
-        })
-        .fold(1.0, |acc, f| acc * f)
+///
+/// Native Linux and Windows touchpads report a pinch as Ctrl+wheel, not as `Event::Zoom`;
+/// egui's wheel state leaves those events to the zoom modifier. Read them here as well, with
+/// the same raw delta as [`immediate_wheel`] skips, so a native pinch reaches the camera.
+pub(crate) fn pinch_factor(input: &egui::InputState, options: egui::InputOptions, page_height: f32) -> f32 {
+    let mut factor = 1.0;
+    for event in &input.events {
+        match event {
+            egui::Event::Zoom(f) => {
+                if f.is_finite() && *f > 0.0 {
+                    factor *= f;
+                }
+            }
+            egui::Event::MouseWheel { unit, delta, modifiers, .. } if modifiers.matches_any(options.zoom_modifier) => {
+                let points = match unit {
+                    egui::MouseWheelUnit::Point => *delta,
+                    egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
+                    egui::MouseWheelUnit::Page => *delta * page_height,
+                };
+                let f = (options.scroll_zoom_speed * (points.x + points.y)).exp();
+                if f.is_finite() && f > 0.0 {
+                    factor *= f;
+                }
+            }
+            _ => {}
+        }
+    }
+    factor
 }
 
 /// Give this frame's wheel to the widget under the pointer that uses it itself (a value field
@@ -518,7 +537,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         scroll
     };
     // Pinch-to-zoom (trackpad): direct manipulation, never smoothed.
-    let pinch = ui.input(pinch_factor);
+    let pinch = ui.input(|i| pinch_factor(i, options, page_height));
     let h = rect.height().max(1.0) as f64;
     if inside && pinch != 1.0 {
         app.viewport.orbit_free = None;
@@ -1091,7 +1110,7 @@ mod tests {
         assert_eq!(events.last(), Some(&egui::Event::Zoom(1.1)));
         let mut input = egui::InputState::default();
         input.events = events;
-        assert!((super::pinch_factor(&input) - 1.1).abs() < 1e-6);
+        assert!((super::pinch_factor(&input, egui::InputOptions::default(), 600.0) - 1.1).abs() < 1e-6);
     }
 
     #[test]
@@ -1649,6 +1668,92 @@ mod tests {
             }
             assert_ne!(app.cam.distance, before.distance, "{preset}: the wheel zooms");
         }
+    }
+
+    /// A native touchpad reports a pinch as Ctrl+wheel (Linux and Windows). It must zoom the
+    /// view, not fall through both the wheel path (which leaves the zoom modifier alone) and
+    /// the pinch path (which only reads `Event::Zoom`).
+    #[test]
+    fn native_ctrl_wheel_pinch_zooms_the_view() {
+        use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, pos2, vec2};
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        let mut app = crate::SolveApp::new(s, crate::Services::default());
+        let ctx = crate::fonts::test_context();
+        let mut time = 0.0;
+        let at = pos2(200.0, 300.0);
+        let mut frame = |app: &mut crate::SolveApp, events: Vec<Event>| {
+            time += 1.0 / 60.0;
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                app.viewport.rect = Some(rect);
+                let resp = ui.interact(rect, ui.id().with("native-pinch"), egui::Sense::click_and_drag());
+                super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        let before = app.cam;
+        frame(
+            &mut app,
+            vec![
+                Event::ModifiersChanged(Modifiers::CTRL),
+                Event::PointerMoved(at),
+                Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 50.0), modifiers: Modifiers::CTRL, phase: TouchPhase::Move },
+            ],
+        );
+        assert!(app.cam.distance < before.distance, "a positive Ctrl+wheel pinch zooms in: {} -> {}", before.distance, app.cam.distance);
+        // The factor is the wheel path's own math: the same event without the modifier
+        // zooms the camera by the same amount through `immediate_wheel`'s scroll.
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        let mut plain = crate::SolveApp::new(s, crate::Services::default());
+        frame(&mut plain, vec![Event::PointerMoved(at)]);
+        let plain_before = plain.cam;
+        frame(
+            &mut plain,
+            vec![
+                Event::PointerMoved(at),
+                Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 50.0), modifiers: Modifiers::NONE, phase: TouchPhase::Move },
+            ],
+        );
+        let pinched = before.distance / app.cam.distance;
+        let expected = (0.005f64 * 50.0).exp();
+        assert!((pinched / expected - 1.0).abs() < 0.02, "the pinch factor is exp(scroll_zoom_speed * delta) = {expected:.3}x, got {pinched:.3}x");
+        let wheeled = plain_before.distance / plain.cam.distance;
+        assert!(wheeled > 1.0, "the bare wheel still zooms in on its own path: {wheeled:.3}x");
+    }
+
+    /// The pinch factor reads native Ctrl+wheel pinches in every wheel unit, scaled the way egui
+    /// scales them, and leaves wheels without the zoom modifier to [`immediate_wheel`].
+    #[test]
+    fn pinch_factor_reads_native_ctrl_wheel_in_every_unit() {
+        use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, vec2};
+        let options = egui::InputOptions::default();
+        let factor = |events: Vec<Event>| {
+            let mut input = egui::InputState::default();
+            input.events = events;
+            super::pinch_factor(&input, options, 600.0)
+        };
+        let wheel = |unit, delta, modifiers| Event::MouseWheel { unit, delta, modifiers, phase: TouchPhase::Move };
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        let point = factor(vec![wheel(MouseWheelUnit::Point, vec2(0.0, 40.0), Modifiers::CTRL)]);
+        assert!(close(point, (options.scroll_zoom_speed * 40.0).exp()), "point pinch {point}");
+        let line = factor(vec![wheel(MouseWheelUnit::Line, vec2(0.0, 1.0), Modifiers::CTRL)]);
+        assert!(close(line, (options.scroll_zoom_speed * options.line_scroll_speed).exp()), "line pinch {line}");
+        let page = factor(vec![wheel(MouseWheelUnit::Page, vec2(0.0, 0.5), Modifiers::CTRL)]);
+        assert!(close(page, (options.scroll_zoom_speed * 300.0).exp()), "page pinch {page}");
+        assert_eq!(factor(vec![wheel(MouseWheelUnit::Point, vec2(0.0, 40.0), Modifiers::NONE)]), 1.0, "a bare wheel belongs to the scroll path");
+        assert_eq!(factor(vec![Event::Zoom(1.25)]), 1.25);
+        let both = factor(vec![Event::Zoom(1.25), wheel(MouseWheelUnit::Point, vec2(0.0, 40.0), Modifiers::CTRL)]);
+        assert!(close(both, 1.25 * (options.scroll_zoom_speed * 40.0).exp()), "zoom events and pinch wheel combine {both}");
     }
 
     /// The 3D mouse pans and zooms a flat page with the cap and never turns it, as the mouse
