@@ -1074,13 +1074,16 @@ mod tests {
         assert!(raw.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { modifiers, .. } if modifiers.shift)));
     }
 
-    /// What the cap turns the view around is chosen when it leaves rest and let go when it is back.
+    /// What the cap turns the view around is chosen when it starts turning and let go when it is
+    /// back at rest.
     #[test]
     fn the_cap_lets_go_of_its_turning_point_at_rest() {
         let mut app = app();
         let ctx = window(true);
         app.space_mouse.device = Some("hid 046d:c62b".into());
-        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [0; 3], rotation: [300, 0, 0] }, 0.016);
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [0; 3] }, 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "a pan alone turns around nothing");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [300, 0, 0] }, 0.016);
         assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
         assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");

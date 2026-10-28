@@ -745,10 +745,10 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     let anchor = zoom_anchor(app, rect, Some(rect.center()), caps.orbit);
     // The view turns around the model in the middle of the view, else the middle of the bodies in
     // view, so what the user is looking at stays put. Off: around the view's centre, as before.
-    // The cap keeps the point it started with until it is back at rest; a device app sends no
-    // rest, so its turns pick it each frame.
+    // The cap keeps the point it started turning around until it is back at rest (and the view
+    // shows it there); a device app sends no rest, so its turns pick it each frame.
     let pivot = (turn && app.preferences.space_mouse_model_pivot).then(|| {
-        let cap = app.viewport.device_motion.is_some();
+        let cap = app.viewport.device_motion.is_some_and(|m| m.motion.rotation != [0.0; 3]);
         match app.viewport.device_pivot.filter(|_| cap) {
             Some(p) => p,
             None => {
