@@ -878,6 +878,10 @@ preference_settings! {
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
     /// left corner. Off by default.
     space_mouse_in_view: bool = false, PAGE_NAVIGATION => check_id("ui.3d_mouse_show_in_view");
+    /// The 3D mouse turns the view around the model in the middle of the view (else the middle of
+    /// the bodies in view), so what is in the middle stays put. Off: around the view's centre, as
+    /// it did before.
+    space_mouse_model_pivot: bool = true, PAGE_NAVIGATION => check_id("ui.3d_mouse_model_pivot");
     /// Speed multiplier for 3D mouse navigation.
     space_mouse_speed: f32 = 1.0, PAGE_NAVIGATION;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
@@ -2326,6 +2330,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
+            setting::space_mouse_model_pivot(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_model_pivot_tip"));
         });
     });
     // Where the picture goes, a choice that waits on the checkbox above.
@@ -2650,9 +2655,9 @@ fn found_but_not_allowed(drivers: Option<crate::space_mouse::DriversPresent>) ->
 }
 
 /// Puts this section's settings back: the driver choice, the speed, each axis's invert and speed and
-/// assignment, where the picture goes and whether it shows. Not the calibration (it has its own
-/// Forget), the button mapping, the offered set, "never show again", "Navigate with the 3D mouse" or
-/// the test model.
+/// assignment, where the picture goes and whether it shows, and what the view turns around. Not
+/// the calibration (it has its own Forget), the button mapping, the offered set, "never show
+/// again", "Navigate with the 3D mouse" or the test model.
 pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     let d = Prefs::default();
     let p = &mut app.preferences;
@@ -2663,6 +2668,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_axis_source = d.space_mouse_axis_source;
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
+    p.space_mouse_model_pivot = d.space_mouse_model_pivot;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -4047,6 +4053,7 @@ mod tests {
         p.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
+        p.space_mouse_model_pivot = false;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -4058,6 +4065,7 @@ mod tests {
         );
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
+        assert_eq!(p.space_mouse_model_pivot, d.space_mouse_model_pivot);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
