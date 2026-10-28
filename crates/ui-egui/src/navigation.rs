@@ -672,9 +672,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
             match mode {
                 Some(NavMode::Pan) => app.cam.pan(f64::from(delta.x), f64::from(delta.y), h),
-                // Drag-zoom holds the point under the pointer, like the wheel (#7435).
+                // Drag-zoom holds the point where the drag started, as the wheel holds the point
+                // under the cursor (#7435). Following the moving pointer would slide the zoom away
+                // from what was pressed on.
                 Some(NavMode::Zoom) => {
-                    let anchor = zoom_anchor(app, rect, hover, caps.orbit);
+                    let press = ui.input(|i| i.pointer.press_origin());
+                    let anchor = zoom_anchor(app, rect, press.or(hover), caps.orbit);
                     app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
                 }
                 _ => {}
@@ -1753,7 +1756,8 @@ mod tests {
                 assert_eq!(outside(&h.app.cam), to_cursor, "to_cursor={to_cursor} cap={cap}: the eye ends at {:?}", h.app.cam.eye());
             }
         }
-        // Drag-zoom: the "Zoom" navigation tool follows the pointer, so it holds the model too.
+        // Drag-zoom: the "Zoom" navigation tool holds the model point where the drag started, so
+        // that point stays under the press while the pointer moves away from it.
         for to_cursor in [true, false] {
             let mut h = crate::scenario::Harness::new();
             h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
@@ -1762,11 +1766,16 @@ mod tests {
             h.settle();
             h.app.cam = Camera::default();
             let rect = h.app.viewport.rect.expect("the viewport");
-            let at = projection(&h.app, rect).to_screen(Vec3::ZERO).expect("the box's middle on screen");
+            let at = projection(&h.app, rect).to_screen(Vec3::new(10.0, 0.0, 10.0)).expect("the box on screen");
+            let held = zoom_anchor(&mut h.app, rect, Some(at), true);
             for _ in 0..12 {
-                h.call("ui.drag", json!({"x0": at.x, "y0": at.y + 80.0, "x1": at.x, "y1": at.y - 80.0, "steps": 40}));
+                h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x, "y1": at.y - 160.0, "steps": 40}));
             }
             assert_eq!(outside(&h.app.cam), to_cursor, "drag to_cursor={to_cursor}: the eye ends at {:?}", h.app.cam.eye());
+            if let Some(held) = held {
+                let now = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
+                assert!((now - at).length() < 1.0, "the pressed point moved from {at:?} to {now:?}");
+            }
         }
     }
 
