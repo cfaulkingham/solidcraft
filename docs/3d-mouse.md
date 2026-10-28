@@ -6,6 +6,11 @@ declares itself one. Move the cap to pan and zoom, and tilt or twist it to rotat
 stops at the model, as the wheel does: the view comes up to the surface under the middle of the view
 and holds there. With Preferences › Navigation › "Zoom to the cursor" off, zoom passes through the
 model instead, as the wheel does too.
+Tilting or twisting the cap turns the view around the part of the model in the middle of the view
+when the turn begins, and a faint ball marks that point until the cap is back at rest. Over empty
+space it turns around the middle of the bodies in view. Preferences › Navigation › 3D mouse ›
+Orbit chooses this (Traced, the default) or Classic, which turns around the view's centre with no
+marker, as earlier versions did.
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the navigation cube, the cap can rotate it too. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
