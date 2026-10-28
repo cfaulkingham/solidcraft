@@ -689,10 +689,10 @@ preference_settings! {
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
     /// left corner. Off by default.
     space_mouse_in_view: bool = false, PAGE_NAVIGATION => check_id("ui.3d_mouse_show_in_view");
-    /// The 3D mouse turns the view around the model in the middle of the view (else the middle of
-    /// the bodies in view), so what is in the middle stays put. Off: around the view's centre, as
-    /// it did before.
-    space_mouse_model_pivot: bool = true, PAGE_NAVIGATION => check_id("ui.3d_mouse_model_pivot");
+    /// 3D mouse orbit: traced (on) turns the view around the model in the middle of the view when
+    /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
+    /// (off) turns it around the view's centre, as it did before.
+    space_mouse_model_pivot: bool = true, PAGE_NAVIGATION;
     /// Speed multiplier for 3D mouse navigation.
     space_mouse_speed: f32 = 1.0, PAGE_NAVIGATION;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
@@ -1919,7 +1919,6 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
-            setting::space_mouse_model_pivot(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_model_pivot_tip"));
         });
     });
     // Where the picture goes, a choice that waits on the checkbox above.
@@ -1930,7 +1929,20 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ]
     .map(|(position, key)| (position, app.tr(key).to_owned()))
     .into();
+    let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
+        // Traced or classic orbit: a choice between two named ways rather than a checkbox.
+        ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_orbit"), |ui| {
+            let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
+            let response = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &orbits.each_ref().map(String::as_str), ui_kit::Segments::default()));
+            if response.inner {
+                app.preferences.space_mouse_model_pivot = selected == 0;
+            }
+            let rect = response.response.rect;
+            crate::scenario::publish_handle("prefs:3d_mouse_orbit_traced", egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y));
+            crate::scenario::publish_handle("prefs:3d_mouse_orbit_classic", egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y));
+            response.response.on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
+        });
         ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_ghost_position"), |ui| {
             let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
             ui.add_enabled_ui(in_view, |ui| {
@@ -3088,6 +3100,18 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
+    }
+
+    /// The 3D mouse's orbit is a choice of two: Classic turns around the view's centre, Traced
+    /// around the model in the middle of the view.
+    #[test]
+    fn the_3d_mouse_orbit_is_traced_or_classic() {
+        let mut h = changed_3d_mouse_settings(None);
+        assert!(h.app.preferences.space_mouse_model_pivot, "traced is the default");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
+        assert!(!h.app.preferences.space_mouse_model_pivot, "classic");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_traced");
+        assert!(h.app.preferences.space_mouse_model_pivot, "traced again");
     }
 
     /// Opens Preferences on the Navigation page with the 3D mouse section open and these settings
