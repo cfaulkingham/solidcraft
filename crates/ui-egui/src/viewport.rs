@@ -7742,7 +7742,9 @@ mod tests {
                 assert_eq!(app.cam.distance, before.distance);
             } else if shift {
                 assert_ne!(app.cam.distance, before.distance);
-                assert_eq!(app.cam.target, before.target);
+                // Zoom holds the model point under the pointer like the wheel, so the target moves
+                // with it (#7435).
+                assert_ne!(app.cam.target, before.target);
                 assert_eq!(app.cam.yaw, before.yaw);
             } else {
                 assert_ne!(app.cam.target, before.target);

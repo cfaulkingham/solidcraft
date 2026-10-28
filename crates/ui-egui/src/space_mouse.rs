@@ -690,7 +690,7 @@ mod tests {
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
     fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool, reverse_zoom: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, reverse_zoom, false);
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, reverse_zoom, false, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
