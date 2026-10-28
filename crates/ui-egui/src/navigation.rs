@@ -745,7 +745,21 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     let anchor = zoom_anchor(app, rect, Some(rect.center()), caps.orbit);
     // The view turns around the model in the middle of the view, else the middle of the bodies in
     // view, so what the user is looking at stays put. Off: around the view's centre, as before.
-    let pivot = (turn && app.preferences.space_mouse_model_pivot).then(|| crate::prefs::pivot_under(app, &projection(app, rect), rect.center()));
+    // The cap keeps the point it started with until it is back at rest; a device app sends no
+    // rest, so its turns pick it each frame.
+    let pivot = (turn && app.preferences.space_mouse_model_pivot).then(|| {
+        let cap = app.viewport.device_motion.is_some();
+        match app.viewport.device_pivot.filter(|_| cap) {
+            Some(p) => p,
+            None => {
+                let p = crate::prefs::pivot_under(app, &projection(app, rect), rect.center());
+                if cap {
+                    app.viewport.device_pivot = Some(p);
+                }
+                p
+            }
+        }
+    });
     if let Some(queued) = app.viewport.device_motion.take() {
         device_camera(
             &mut app.cam,
@@ -1830,6 +1844,14 @@ mod tests {
                 let now = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
                 let still = (now - rect.center()).length() < 1.0;
                 assert_eq!(still, model_pivot, "free={free} model_pivot={model_pivot}: the middle point moved to {now:?}");
+                // Panning while it turns brings other parts of the model to the middle; the turn
+                // keeps the point it started with until the cap is back at rest.
+                for _ in 0..10 {
+                    h.app.viewport.device_motion =
+                        Some(DeviceMotion { motion: Motion { translation: [0.5, 0.0, 0.0], rotation: [0.5, 0.5, 0.0] }, seconds: 0.05 });
+                    device(&mut h.app, rect, NavCaps::MODEL);
+                }
+                assert_eq!(h.app.viewport.device_pivot, model_pivot.then_some(held), "free={free}: the turn kept its point");
             }
         }
     }
