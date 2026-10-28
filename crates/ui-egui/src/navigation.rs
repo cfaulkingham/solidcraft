@@ -743,12 +743,25 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     // "Zoom to the cursor" off the anchor is none, so the cap and the bridge zoom through the model
     // as they did before, as the wheel does too.
     let anchor = zoom_anchor(app, rect, Some(rect.center()), caps.orbit);
+    // The view turns around the model in the middle of the view, else the middle of the bodies in
+    // view, so what the user is looking at stays put. Off: around the view's centre, as before.
+    let pivot = (turn && app.preferences.space_mouse_model_pivot).then(|| crate::prefs::pivot_under(app, &projection(app, rect), rect.center()));
     if let Some(queued) = app.viewport.device_motion.take() {
-        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor);
+        device_camera(
+            &mut app.cam,
+            queued.motion,
+            queued.seconds,
+            height,
+            turn,
+            app.preferences.zoom_reverse,
+            app.preferences.free_orbit,
+            anchor,
+            pivot,
+        );
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
-        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor);
+        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
     }
 }
 
@@ -760,7 +773,8 @@ const BRIDGE_ZOOM_PER_STEP: f64 = 0.08;
 /// tall: orbit and pan as a pointer drag of that many points, zoom by steps. With `turn` off (a
 /// flat page, a sketch being edited) the view keeps its orientation and the orbit motion pans
 /// instead, so the device still moves the view. `anchor` is the model point the view holds while
-/// it zooms, as the wheel's cursor point (none zooms through the model, #7435).
+/// it zooms, as the wheel's cursor point (none zooms through the model, #7435). `pivot` is the
+/// point the view turns around and keeps still on screen (none: the view's centre).
 pub(crate) fn bridge_camera(
     cam: &mut Camera,
     motion: BridgeMotion,
@@ -769,15 +783,20 @@ pub(crate) fn bridge_camera(
     reverse_zoom: bool,
     free_orbit: bool,
     anchor: Option<Vec3>,
+    pivot: Option<Vec3>,
 ) {
     let motion = BridgeMotion::default().plus(motion);
     let [mut px, mut py] = motion.pan;
     let [ox, oy] = motion.orbit;
     if turn {
+        let keep = pivot.map(|p| (p, cam.frame_coords(p)));
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
             cam.orbit(ox, oy);
+        }
+        if let Some((p, coords)) = keep {
+            cam.place(p, coords);
         }
     } else {
         px += ox;
@@ -796,6 +815,7 @@ pub(crate) fn bridge_camera(
 /// pans about 0.6 of the view's height a second and turns about two radians a second, whatever
 /// the frame rate. With `turn` off the view keeps its orientation. `anchor` is the model point the
 /// view holds while it zooms, as the wheel's cursor point (none zooms through the model, #7435).
+/// `pivot` is the point the view turns around and keeps still on screen (none: the view's centre).
 pub(crate) fn device_camera(
     cam: &mut Camera,
     motion: Motion,
@@ -805,6 +825,7 @@ pub(crate) fn device_camera(
     reverse_zoom: bool,
     free_orbit: bool,
     anchor: Option<Vec3>,
+    pivot: Option<Vec3>,
 ) {
     if !(seconds > 0.0) || !seconds.is_finite() {
         return;
@@ -820,11 +841,15 @@ pub(crate) fn device_camera(
         // These are logical 3DxWare coordinates after the profile mapping: Rx is Tilt, Ry is
         // Roll and Rz is Spin. The KMJ profile swaps physical Ry/Rz for the selected navigation
         // mode, so swapping them again here would make Roll behave like Spin.
+        let keep = pivot.map(|p| (p, cam.frame_coords(p)));
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
             cam.orbit(ry * 250.0 * seconds, rx * 250.0 * seconds);
             cam.roll_by(rz * 2.0 * seconds);
+        }
+        if let Some((p, coords)) = keep {
+            cam.place(p, coords);
         }
     }
 }
@@ -1507,7 +1532,7 @@ mod tests {
         }
         // Other presets keep the existing upright camera behavior.
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
-        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None);
+        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 
@@ -1775,6 +1800,36 @@ mod tests {
             if let Some(held) = held {
                 let now = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
                 assert!((now - at).length() < 1.0, "the pressed point moved from {at:?} to {now:?}");
+            }
+        }
+    }
+
+    /// The 3D mouse turns the view around the model in the middle of the view, so that point stays
+    /// put on screen, as long as "Turn around the model in the middle of the view" is on. Off, it
+    /// turns around the view's centre and the point swings away.
+    #[test]
+    fn the_3d_mouse_turns_around_the_model_in_the_middle_of_the_view() {
+        use super::*;
+        use crate::space_mouse::{DeviceMotion, Motion};
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for free in [false, true] {
+            for model_pivot in [true, false] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+                h.app.preferences.space_mouse_model_pivot = model_pivot;
+                h.app.preferences.free_orbit = free;
+                h.settle();
+                // Looking at the box from far away, so the view's centre is well behind the face.
+                h.app.cam = Camera { distance: 400.0, ..Camera::default() };
+                let held = crate::prefs::pivot_under(&h.app, &projection(&h.app, rect), rect.center());
+                for _ in 0..10 {
+                    h.app.viewport.device_motion =
+                        Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.5, 0.5, 0.0] }, seconds: 0.05 });
+                    device(&mut h.app, rect, NavCaps::MODEL);
+                }
+                let now = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
+                let still = (now - rect.center()).length() < 1.0;
+                assert_eq!(still, model_pivot, "free={free} model_pivot={model_pivot}: the middle point moved to {now:?}");
             }
         }
     }

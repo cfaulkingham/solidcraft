@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.3d_mouse_model_pivot": "Turn around the model in the middle of the view",
+    "ui.3d_mouse_model_pivot_tip": "The 3D mouse turns the view around the part of the model in the middle of the view, so it stays put (off: around the view's centre)"
+  },
+  "ar": {
+    "ui.3d_mouse_model_pivot": "الدوران حول النموذج في منتصف العرض",
+    "ui.3d_mouse_model_pivot_tip": "تُدير الفأرة ثلاثية الأبعاد العرض حول جزء النموذج الموجود في منتصف العرض، فيبقى في مكانه (عند الإيقاف: حول مركز العرض)"
+  },
+  "de": {
+    "ui.3d_mouse_model_pivot": "Um das Modell in der Ansichtsmitte drehen",
+    "ui.3d_mouse_model_pivot_tip": "Die 3D-Maus dreht die Ansicht um den Teil des Modells in der Ansichtsmitte, sodass er an seinem Platz bleibt (aus: um die Ansichtsmitte)"
+  },
+  "he": {
+    "ui.3d_mouse_model_pivot": "סיבוב סביב המודל שבמרכז המבט",
+    "ui.3d_mouse_model_pivot_tip": "העכבר התלת־ממדי מסובב את המבט סביב החלק של המודל שבמרכז המבט, כך שהוא נשאר במקומו (כבוי: סביב מרכז המבט)"
+  },
+  "ja": {
+    "ui.3d_mouse_model_pivot": "ビュー中央のモデルを中心に回転",
+    "ui.3d_mouse_model_pivot_tip": "3Dマウスでビューの中央にあるモデルの部分を中心にビューを回転し、その部分を動かさずに保ちます（オフの場合はビューの中心を基準に回転します）。"
+  },
+  "ko": {
+    "ui.3d_mouse_model_pivot": "뷰 가운데의 모델을 중심으로 회전",
+    "ui.3d_mouse_model_pivot_tip": "3D 마우스가 뷰 가운데에 있는 모델 부분을 중심으로 뷰를 회전하여 그 부분이 제자리에 머뭅니다 (끔: 뷰의 중심을 기준으로)"
+  },
+  "vi": {
+    "ui.3d_mouse_model_pivot": "Xoay quanh mô hình ở giữa khung nhìn",
+    "ui.3d_mouse_model_pivot_tip": "Chuột 3D xoay khung nhìn quanh phần mô hình ở giữa khung nhìn để phần đó đứng yên (khi tắt: xoay quanh tâm khung nhìn)"
+  },
+  "zh": {
+    "ui.3d_mouse_model_pivot": "围绕视图中间的模型旋转",
+    "ui.3d_mouse_model_pivot_tip": "3D 鼠标围绕视图中间的模型部分旋转视图，使其保持不动（关闭：围绕视图中心旋转）"
+  }
+}
