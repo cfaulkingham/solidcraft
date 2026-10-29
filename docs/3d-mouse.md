@@ -2,15 +2,20 @@
 
 On Windows, macOS and Linux, SolidCraft detects a connected 3D mouse through its HID multi-axis
 controller interface: a 3Dconnexion SpaceNavigator or SpaceMouse, or a homemade device that
-declares itself one. Move the cap to pan and zoom, and tilt or twist it to rotate the 3D view. Zoom
-stops at the model, as the wheel does: the view comes up to the surface under the middle of the view
-and holds there. With Preferences › Navigation › "Zoom to the cursor" off, zoom passes through the
-model instead, as the wheel does too.
-Tilting or twisting the cap turns the view around the part of the model in the middle of the view
-when the turn begins, and a faint ball marks that point until the cap is back at rest. Over empty
-space it turns around the middle of the bodies in view. Preferences › Navigation › 3D mouse ›
-Orbit chooses this (Traced, the default) or Classic, which turns around the view's centre with no
-marker, as earlier versions did.
+declares itself one. Move the cap to pan and zoom, and tilt or twist it to rotate the 3D view.
+By default, zoom can pass through the model and orbit turns around the view's centre, as in earlier
+versions. Two preferences opt into holding the model:
+
+- Preferences › Navigation › **Stop zoom at the model** (`zoom_stop_at_model`, off by default)
+  makes the cap and navigation bridge zoom toward the surface in the middle of the view and stop
+  there. Drag-zoom holds the model point where the drag began. The wheel and pinch keep their
+  separate **Zoom to the cursor** preference; neither setting changes the other.
+- Preferences › Navigation › 3D mouse › **Orbit** defaults to **Classic**. Choose **Traced**
+  (`space_mouse_model_pivot: true`) to turn around the model point in the middle of the view when
+  the turn begins. A faint ball marks that point until the cap is back at rest. Over empty space,
+  the pivot is the middle of the bodies in view. The navigation bridge uses the same preference,
+  but picks the point each frame because device apps do not report rest.
+
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the navigation cube, the cap can rotate it too. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
@@ -79,7 +84,7 @@ know, is ignored:
 |---|---|
 | `{"t":"hello","server":"MAKMOUSE","device":"MAKMOUSE"}` | The program's name (shown in Preferences) and, optionally, a name in the device's USB manufacturer or product string. A 3D mouse with that name is then left to the program, so its motion doesn't reach the view twice. |
 | `{"t":"axis","x":4.0,"y":-2.5}` | Motion since the last message, in points: it orbits as a drag of that many points would (the model follows), or pans or zooms in the current mode. Where the view can't turn (a sketch being edited, a flat page) an orbit pans. |
-| `{"t":"zoom","d":1.0}` | Zoom steps (8 % of the distance each); positive zooms in and stops at the model, as a wheel turned forward. Reverse zoom direction applies. |
+| `{"t":"zoom","d":1.0}` | Zoom steps (8 % of the distance each); positive zooms in, as a wheel turned forward. Reverse zoom direction applies. Stops at the model only when **Stop zoom at the model** is on. |
 | `{"t":"mode","mode":"pan","on":true}` | What `axis` drives: `orbit` (the default), `pan` or `zoom` (up zooms in, 8 points a step). `"on":false` goes back to orbit. |
 | `{"t":"view","name":"iso"}` | A standard view: `front`, `back`, `left`, `right`, `top`, `bottom`, `iso`, or `fit` to frame everything. |
 

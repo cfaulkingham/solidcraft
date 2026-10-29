@@ -880,8 +880,8 @@ preference_settings! {
     space_mouse_in_view: bool = false, PAGE_NAVIGATION => check_id("ui.3d_mouse_show_in_view");
     /// 3D mouse orbit: traced (on) turns the view around the model in the middle of the view when
     /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
-    /// (off) turns it around the view's centre, as it did before.
-    space_mouse_model_pivot: bool = true, PAGE_NAVIGATION;
+    /// (off, the default) turns it around the view's centre, as it did before.
+    space_mouse_model_pivot: bool = false, PAGE_NAVIGATION;
     /// Speed multiplier for 3D mouse navigation.
     space_mouse_speed: f32 = 1.0, PAGE_NAVIGATION;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
@@ -1094,6 +1094,9 @@ preference_settings! {
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
     wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
+    /// Opt-in surface anchoring for the 3D mouse, navigation bridge and drag-zoom. The wheel
+    /// and pinch retain their independent `zoom_to_cursor` preference.
+    zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -4065,7 +4068,7 @@ mod tests {
         p.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
-        p.space_mouse_model_pivot = false;
+        p.space_mouse_model_pivot = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -4094,11 +4097,43 @@ mod tests {
     #[test]
     fn the_3d_mouse_orbit_is_traced_or_classic() {
         let mut h = changed_3d_mouse_settings(None);
-        assert!(h.app.preferences.space_mouse_model_pivot, "traced is the default");
-        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
-        assert!(!h.app.preferences.space_mouse_model_pivot, "classic");
+        assert!(!h.app.preferences.space_mouse_model_pivot, "classic is the default");
         scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_traced");
-        assert!(h.app.preferences.space_mouse_model_pivot, "traced again");
+        assert!(h.app.preferences.space_mouse_model_pivot, "traced is opt-in");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
+        assert!(!h.app.preferences.space_mouse_model_pivot, "classic again");
+        assert!(!h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is off by default");
+        scroll_to_and_click(&mut h, "prefs:zoom_stop_at_model");
+        assert!(h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is opt-in");
+        assert!(h.app.preferences.zoom_to_cursor, "the wheel preference is unchanged");
+    }
+
+    #[test]
+    fn model_navigation_is_opt_in_and_persists() {
+        for to_cursor in [false, true] {
+            let old = serde_json::from_value::<Prefs>(json!({"zoom_to_cursor": to_cursor})).unwrap();
+            assert!(!old.zoom_stop_at_model && !old.space_mouse_model_pivot, "older saved preferences keep legacy navigation");
+            assert_eq!(old.zoom_to_cursor, to_cursor);
+        }
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        let enabled = json!({"open": "Navigation", "zoom_stop_at_model": true, "space_mouse_model_pivot": true});
+        control(&mut app, &enabled).unwrap();
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        let reply = control(&mut app, &enabled).unwrap();
+        assert_eq!(reply["zoom_stop_at_model"], true);
+        assert_eq!(reply["space_mouse_model_pivot"], true);
+        control(&mut app, &json!({"button": "apply"})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(other.preferences.zoom_stop_at_model && other.preferences.space_mouse_model_pivot);
+        assert!(other.preferences.zoom_to_cursor, "enabling model navigation leaves wheel zoom alone");
+        control(&mut app, &json!({"button": "defaults"})).unwrap();
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        assert!(app.preferences.zoom_to_cursor, "Navigation defaults still anchor the wheel");
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert!(app.preferences.zoom_stop_at_model && app.preferences.space_mouse_model_pivot, "Cancel restores the last Apply");
     }
 
     /// Opens Preferences on the Navigation page with the 3D mouse section open and these settings

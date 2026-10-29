@@ -1079,6 +1079,7 @@ mod tests {
     #[test]
     fn the_cap_lets_go_of_its_turning_point_at_rest() {
         let mut app = app();
+        app.preferences.space_mouse_model_pivot = true;
         let ctx = window(true);
         app.space_mouse.device = Some("hid 046d:c62b".into());
         frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [0; 3] }, 0.016);
