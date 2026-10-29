@@ -916,19 +916,17 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.scroll" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
-            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));
             // Mouse-wheel semantics (lines): zooms regardless of the trackpad pan
             // preference, so scripts and agents keep working. Trackpads report points.
-            // `ctrl: true` sends what a native touchpad sends for a pinch: Ctrl held and the
-            // wheel in points (#8480), so a script or scenario can replay one. `unit` says
-            // which unit to send; without it, ctrl means points and no ctrl means lines.
+            // `ctrl: true` replays a Ctrl+wheel pinch in points (#8480). An explicit `unit`
+            // overrides that choice; without ctrl the default remains a line wheel.
             let speed = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
             let points = f("delta").unwrap_or(-100.0);
             let ctrl = b("ctrl");
-            let unit = match s("unit") {
-                Some("point") => egui::MouseWheelUnit::Point,
-                Some("line") => egui::MouseWheelUnit::Line,
-                Some(other) => return err(format!("`unit` must be point or line, not `{other}`")),
+            let unit = match p.get("unit") {
+                Some(Value::String(unit)) if unit == "point" => egui::MouseWheelUnit::Point,
+                Some(Value::String(unit)) if unit == "line" => egui::MouseWheelUnit::Line,
+                Some(_) => return err("`unit` must be point or line"),
                 None if ctrl => egui::MouseWheelUnit::Point,
                 None => egui::MouseWheelUnit::Line,
             };
@@ -938,12 +936,17 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 egui::MouseWheelUnit::Line => points / f64::from(speed),
                 _ => points,
             };
+            let (x, y, delta) = (x as f32, y as f32, delta as f32);
+            if !x.is_finite() || !y.is_finite() || !delta.is_finite() {
+                return err("x, y and delta must fit finite screen coordinates");
+            }
             let modifiers = if ctrl { egui::Modifiers::CTRL } else { Default::default() };
             let explicit = p.get("ctrl").is_some();
+            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x, y)));
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
             }
-            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta as f32), modifiers, phase: egui::TouchPhase::Move });
+            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
@@ -1268,8 +1271,7 @@ mod tests {
         assert!(h.app.viewport.boxsel.is_none());
     }
 
-    /// #8480: `ui.scroll` with `ctrl: true` sends the gesture a native touchpad sends for a
-    /// pinch (Ctrl held, wheel in points), so scripts and scenarios can replay one. Without
+    /// #8480: `ui.scroll` with `ctrl: true` replays a Ctrl+wheel pinch in points. Without
     /// `ctrl` the wheel stays a line wheel on the mouse path.
     #[test]
     fn scroll_sends_a_native_pinch_with_ctrl() {
@@ -1293,7 +1295,7 @@ mod tests {
             .collect();
         assert_eq!(wheels.len(), 1, "one wheel event: {wheels:?}");
         let (unit, delta, modifiers) = wheels[0];
-        assert_eq!(unit, egui::MouseWheelUnit::Point, "a native pinch arrives in points");
+        assert_eq!(unit, egui::MouseWheelUnit::Point, "the pinch replay uses points");
         assert!((delta.y - 40.0).abs() < 1e-6, "points pass through: {delta:?}");
         assert!(modifiers.matches_any(egui::Modifiers::COMMAND), "Ctrl is held: {modifiers:?}");
         let changes: Vec<_> = events
@@ -1324,6 +1326,22 @@ mod tests {
         assert!((delta.y * ctx.options(|o| o.input_options.line_scroll_speed) - 40.0).abs() < 1e-3, "lines land on the same points: {delta:?}");
         assert!(!modifiers.matches_any(egui::Modifiers::COMMAND), "no modifier without ctrl");
         assert!(app.synthetic.is_empty());
+    }
+
+    #[test]
+    fn scroll_rejects_invalid_input_without_queuing_events() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let ctx = crate::fonts::test_context();
+        for invalid in
+            [json!({"unit":"invalid"}), json!({"unit":42}), json!({"unit":null}), json!({"x":1e300}), json!({"y":-1e300}), json!({"delta":1e300})]
+        {
+            let mut params = json!({"x":200,"y":300,"delta":40,"ctrl":true});
+            params.as_object_mut().unwrap().extend(invalid.as_object().unwrap().clone());
+            let (req, _) = ControlRequest::new("ui.scroll", params.clone());
+            let Outcome::Done(reply) = handle(&mut app, &ctx, &req) else { panic!("not a scroll reply") };
+            assert_eq!(reply["ok"], false, "{params}: {reply}");
+            assert!(app.synthetic.is_empty(), "a rejected scroll must not queue input: {params}");
+        }
     }
 
     #[test]

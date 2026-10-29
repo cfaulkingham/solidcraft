@@ -235,9 +235,9 @@ pub(crate) fn immediate_wheel(
 
 /// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
 ///
-/// Native Linux and Windows touchpads report a pinch as Ctrl+wheel, not as `Event::Zoom`;
-/// egui's wheel state leaves those events to the zoom modifier. Read them here as well, with
-/// the same raw delta as [`immediate_wheel`] skips, so a native pinch reaches the camera.
+/// Some input paths deliver pinch as a zoom-modified wheel instead of `Event::Zoom`.
+/// Read the raw movement that [`immediate_wheel`] leaves to the zoom modifier, without
+/// replaying egui's smoothed zoom delta on later frames. Gesture boundaries carry no movement.
 pub(crate) fn pinch_factor(input: &egui::InputState, options: egui::InputOptions, page_height: f32) -> f32 {
     let mut factor = 1.0;
     for event in &input.events {
@@ -247,7 +247,7 @@ pub(crate) fn pinch_factor(input: &egui::InputState, options: egui::InputOptions
                     factor *= f;
                 }
             }
-            egui::Event::MouseWheel { unit, delta, modifiers, .. } if modifiers.matches_any(options.zoom_modifier) => {
+            egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move } if modifiers.matches_any(options.zoom_modifier) => {
                 let points = match unit {
                     egui::MouseWheelUnit::Point => *delta,
                     egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
@@ -1670,9 +1670,7 @@ mod tests {
         }
     }
 
-    /// A native touchpad reports a pinch as Ctrl+wheel (Linux and Windows). It must zoom the
-    /// view, not fall through both the wheel path (which leaves the zoom modifier alone) and
-    /// the pinch path (which only reads `Event::Zoom`).
+    /// A zoom-modified wheel must reach the camera even though the ordinary wheel path skips it.
     #[test]
     fn native_ctrl_wheel_pinch_zooms_the_view() {
         use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, pos2, vec2};
@@ -1710,8 +1708,7 @@ mod tests {
             ],
         );
         assert!(app.cam.distance < before.distance, "a positive Ctrl+wheel pinch zooms in: {} -> {}", before.distance, app.cam.distance);
-        // The factor is the wheel path's own math: the same event without the modifier
-        // zooms the camera by the same amount through `immediate_wheel`'s scroll.
+        // Pinch uses egui's zoom speed; the unmodified wheel still uses the wheel path.
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
         let mut plain = crate::SolveApp::new(s, crate::Services::default());
@@ -1729,6 +1726,61 @@ mod tests {
         assert!((pinched / expected - 1.0).abs() < 0.02, "the pinch factor is exp(scroll_zoom_speed * delta) = {expected:.3}x, got {pinched:.3}x");
         let wheeled = plain_before.distance / plain.cam.distance;
         assert!(wheeled > 1.0, "the bare wheel still zooms in on its own path: {wheeled:.3}x");
+    }
+
+    #[test]
+    fn ctrl_wheel_replay_zooms_once_in_the_viewport() {
+        use serde_json::json;
+        for preset in ["fusion", "touchpad"] {
+            for smooth in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.nav = preset.into();
+                h.app.preferences.smooth_wheel_zoom = smooth;
+                h.app.preferences.zoom_to_cursor = false;
+                h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+                h.step(&json!({"call":"ui.camera", "params":{"target":[20,15,10],"distance":100}})).unwrap();
+                let at = h.app.viewport.rect.unwrap().center();
+                let before = h.app.cam;
+                if preset == "fusion" && !smooth {
+                    h.step(&json!({"shot":"initial"})).unwrap();
+                }
+                h.step(&json!({"call":"ui.scroll", "params":{"x":at.x,"y":at.y,"delta":80,"ctrl":true}})).unwrap();
+                if preset == "fusion" && !smooth {
+                    h.step(&json!({"shot":"pinch-result"})).unwrap();
+                }
+                let after = h.app.cam;
+                let expected = before.distance * (-0.4f64).exp();
+                assert!(
+                    (after.distance - expected).abs() < 1e-5,
+                    "{preset}, smooth={smooth}: {} -> {}, expected {expected}",
+                    before.distance,
+                    after.distance
+                );
+                assert_eq!(after.target, before.target, "a centred pinch must not pan");
+                assert_eq!(after.back(), before.back(), "a pinch must not orbit");
+                h.frames(90);
+                assert_eq!(h.app.cam, after, "a pinch must not replay egui's smoothing tail");
+                h.step(&json!({"call":"ui.scroll", "params":{"x":at.x,"y":at.y,"delta":-80,"ctrl":true}})).unwrap();
+                assert!((h.app.cam.distance - before.distance).abs() < 1e-5, "the opposite pinch restores the scale");
+                let restored = h.app.cam;
+                h.step(&json!({"call":"ui.scroll", "params":{"x":-20,"y":-20,"delta":80,"ctrl":true}})).unwrap();
+                assert_eq!(h.app.cam, restored, "a pinch outside the viewport must not zoom it");
+            }
+        }
+    }
+
+    #[test]
+    fn pinch_factor_ignores_wheel_phase_markers() {
+        for phase in [egui::TouchPhase::Start, egui::TouchPhase::End, egui::TouchPhase::Cancel] {
+            let mut input = egui::InputState::default();
+            input.events = vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, 40.0),
+                modifiers: egui::Modifiers::CTRL,
+                phase,
+            }];
+            assert_eq!(super::pinch_factor(&input, egui::InputOptions::default(), 600.0), 1.0, "{phase:?} is a gesture boundary, not movement");
+        }
     }
 
     /// The pinch factor reads native Ctrl+wheel pinches in every wheel unit, scaled the way egui
