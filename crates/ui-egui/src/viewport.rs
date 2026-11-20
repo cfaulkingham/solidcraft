@@ -7563,10 +7563,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
-    let hits = hover
-        .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
-        })
+    // Empty hits count as empty space on a double-click only if the viewport took the pick.
+    let picked = hover.filter(|_| {
+        inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+    });
+    let hits = picked
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
                 pick_cached(app, &proj, p)
@@ -8115,6 +8116,24 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::edit_in_place::double_click_face(app, &body)
         {
             app.edit_feature_of_face(&body, index, point);
+        }
+        // Double-click empty space with a component active: go back to its parent, as the
+        // ribbon's Activate Parent does. The same preference as a double-click on a face.
+        if resp.double_clicked()
+            && picked.is_some()
+            && hits.is_empty()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && !reference_pick
+            && mods.is_none()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && app.session.active_sketch.is_none()
+            && app.session.active_component != 0
+            && app.preferences.double_click_components
+        {
+            let _ = app.run("component.activate.parent", json!({}));
         }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
